@@ -38,6 +38,9 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 	private int iFrames;
 	private boolean knockedBack;
 	private int knockbackAge;
+	// The dummy keeps its own motion vector: the game's remote-player code isn't built to be pushed
+	// around by anything but server packets, so relying on getVelocity() lost the knockback.
+	private double mx, my, mz;
 	private int combo;
 	private int ticksSinceHit = 10_000;
 
@@ -143,6 +146,21 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 	public void flashHurt() {
 		this.maxHurtTime = 10;
 		this.hurtTime = 10;
+	}
+
+	/** Vanilla knockback formula: (x, z) points from the dummy toward the attacker. */
+	public void applyKnockback(double strength, double x, double z) {
+		if (strength <= 0.0) return;
+		while (x * x + z * z < 1.0E-5) {
+			x = (rng.nextDouble() - rng.nextDouble()) * 0.01;
+			z = (rng.nextDouble() - rng.nextDouble()) * 0.01;
+		}
+		double len = Math.sqrt(x * x + z * z);
+		mx = mx / 2.0 - x / len * strength;
+		mz = mz / 2.0 - z / len * strength;
+		if (isOnGround()) my = Math.min(0.4, my / 2.0 + strength);
+		knockedBack = true;
+		knockbackAge = 0;
 	}
 
 	/** Called when a hit lands. Returns the current combo count. */
@@ -268,8 +286,7 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 
 		if (isSprinting() != sprint) setSprinting(sprint);
 
-		Vec3d v = getVelocity();
-		double vx = v.x, vy = v.y, vz = v.z;
+		double vx = mx, vy = my, vz = mz;
 		boolean ground = isOnGround();
 
 		if (knockedBack) {
@@ -300,10 +317,17 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 
 		setVelocity(vx, vy, vz);
 		move(MovementType.SELF, new Vec3d(vx, vy, vz));
+		Vec3d after = getVelocity(); // move() zeroes the axes we ran into
+		mx = after.x;
+		my = after.y;
+		mz = after.z;
 
 		if (getY() < home.y - 64.0) { // fell into the void
 			setPosition(home.x, home.y, home.z);
 			setVelocity(Vec3d.ZERO);
+			mx = 0.0;
+			my = 0.0;
+			mz = 0.0;
 		}
 
 		if (hasFacing) {

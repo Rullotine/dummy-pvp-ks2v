@@ -21,6 +21,7 @@ import net.minecraft.text.Text;
  * /dummy hold <none|sword|axe|mace|spear|shield>
  * /dummy name <text>     /dummy skin <online player|self>
  * /dummy health <hp>     /dummy windburst <0-3>     /dummy boost <on|off>
+ * /dummy boost server <on|off>   (multiplayer: ask the server for real wind charges; needs op)
  *
  * Client commands are handled locally and never sent to the server.
  */
@@ -111,6 +112,17 @@ final class DummyCommand {
 					DummySettings.boost = false;
 					ctx.getSource().sendFeedback(Text.literal("Mace boost off"));
 					return 1;
-				}))));
+				}))
+				.then(lit("server")
+					.then(lit("on").executes(ctx -> {
+						DummySettings.serverBoost = true;
+						ctx.getSource().sendFeedback(Text.literal("Server boost on: smashes will run /summon wind_charge (needs op on that server)"));
+						return 1;
+					}))
+					.then(lit("off").executes(ctx -> {
+						DummySettings.serverBoost = false;
+						ctx.getSource().sendFeedback(Text.literal("Server boost off"));
+						return 1;
+					})))));
 	}
 }

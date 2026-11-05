@@ -67,13 +67,13 @@ public final class DummyCombat {
 		// ---- hurt flash, hurt sound, knockback (same numbers vanilla uses)
 		dummy.flashHurt();
 		play(world, dummy, SoundEvents.ENTITY_PLAYER_HURT, 1.0F);
-		dummy.takeKnockback(0.4, player.getX() - dummy.getX(), player.getZ() - dummy.getZ());
+		dummy.applyKnockback(0.4, player.getX() - dummy.getX(), player.getZ() - dummy.getZ());
 		if (kb > 0.0) {
 			float yaw = player.getYaw() * 0.017453292F;
-			dummy.takeKnockback(kb * 0.5, MathHelper.sin(yaw), -MathHelper.cos(yaw));
+			dummy.applyKnockback(kb * 0.5, MathHelper.sin(yaw), -MathHelper.cos(yaw));
 		}
 		if (smash) { // mace smash shoves the target away a bit more the further you fell
-			dummy.takeKnockback(0.3 + Math.min(fall, 10.0) * 0.04, player.getX() - dummy.getX(), player.getZ() - dummy.getZ());
+			dummy.applyKnockback(0.3 + Math.min(fall, 10.0) * 0.04, player.getX() - dummy.getX(), player.getZ() - dummy.getZ());
 		}
 		int combo = dummy.registerHit();
 
@@ -118,7 +118,7 @@ public final class DummyCombat {
 		// ---- totem pop
 		if (wouldDie) {
 			dummy.popTotem();
-			dummy.handleStatus((byte) 35); // vanilla "totem used" effect: particles + sound
+			totemEffects(mc, world, dummy);
 			DummyHud.add(dummy.getX(), dummy.getY() + dummy.getHeight() + 0.7, dummy.getZ(),
 				"TOTEM POP #" + dummy.getTotemPops(), 0xFFD700);
 		}
@@ -168,6 +168,19 @@ public final class DummyCombat {
 			}
 		}
 		if (best != null) hit(player, best);
+	}
+
+	/** Totem pop: the real sound, the vanilla particle emitter, plus an instant burst so it's obvious. */
+	private static void totemEffects(MinecraftClient mc, ClientWorld world, PracticeDummy dummy) {
+		play(world, dummy, SoundEvents.ITEM_TOTEM_USE, 1.0F);
+		mc.particleManager.addEmitter(dummy, ParticleTypes.TOTEM_OF_UNDYING, 30);
+		for (int i = 0; i < 40; i++) {
+			world.addParticleClient(ParticleTypes.TOTEM_OF_UNDYING, false, false,
+				dummy.getX() + (FX.nextDouble() - 0.5) * 0.6,
+				dummy.getY() + FX.nextDouble() * dummy.getHeight(),
+				dummy.getZ() + (FX.nextDouble() - 0.5) * 0.6,
+				(FX.nextDouble() - 0.5) * 0.9, FX.nextDouble() * 0.7, (FX.nextDouble() - 0.5) * 0.9);
+		}
 	}
 
 	private static boolean isSword(ItemStack stack) {

@@ -15,6 +15,11 @@ public final class DummySettings {
 	public static int windBurst = 2;
 	/** Mace boost on/off. Only ever applies in single-player worlds. */
 	public static boolean boost = true;
+	/**
+	 * Ask the SERVER for the launch (real wind charges via /summon). Needs command permission on that
+	 * server (op / your own server). Off by default.
+	 */
+	public static boolean serverBoost = false;
 
 	private DummySettings() {}
 }
