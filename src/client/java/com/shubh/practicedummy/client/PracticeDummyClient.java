@@ -1,12 +1,16 @@
 package com.shubh.practicedummy.client;
 
+import com.shubh.practicedummy.client.dummy.DummyBoost;
+import com.shubh.practicedummy.client.dummy.DummyHud;
 import com.shubh.practicedummy.client.dummy.DummyManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
@@ -14,6 +18,7 @@ public class PracticeDummyClient implements ClientModInitializer {
 	public static final String MOD_ID = "practicedummy";
 
 	@Override
+	@SuppressWarnings("deprecation") // HudRenderCallback still works; it just has a newer replacement
 	public void onInitializeClient() {
 		KeyBinding.Category category = KeyBinding.Category.create(Identifier.of(MOD_ID, "main"));
 		KeyBinding spawnKey = KeyBindingHelper.registerKeyBinding(
@@ -25,16 +30,19 @@ public class PracticeDummyClient implements ClientModInitializer {
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			DummyManager.tick(client);
+			DummyHud.tick();
+			DummyBoost.tick(client);
 			while (spawnKey.wasPressed()) DummyManager.spawnAtCrosshair(client, null);
 			while (removeKey.wasPressed()) {
 				int removed = DummyManager.removeAll(client);
 				if (client.inGameHud != null && removed > 0) {
-					client.inGameHud.setOverlayMessage(net.minecraft.text.Text.literal("\u00a7aRemoved " + removed + " dummy(s)"), false);
+					client.inGameHud.setOverlayMessage(Text.literal("\u00a7aRemoved " + removed + " dummy(s)"), false);
 				}
 			}
 			while (modeKey.wasPressed()) DummyManager.cycleMode(client);
 		});
 
+		HudRenderCallback.EVENT.register(DummyHud::render);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> DummyManager.clear());
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> DummyCommand.register(dispatcher));
 	}

@@ -1,10 +1,11 @@
 package com.shubh.practicedummy.client.dummy;
 
-/** How the dummy behaves while alive. */
+/** How the dummy behaves. */
 public enum DummyMode {
 	STAND("standing still"),
 	WALK("wandering around"),
-	STRAFE("circle-strafing you");
+	STRAFE("circle-strafing you"),
+	FIGHT("fighting you (closes in, backs off, hops, swings)");
 
 	public final String description;
 

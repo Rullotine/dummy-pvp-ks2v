@@ -5,9 +5,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.text.Text;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -21,8 +26,6 @@ public final class DummyManager {
 
 	// Negative ids can never collide with ids the server hands out.
 	private static int nextEntityId = -1_000_000;
-	private static DummyMode defaultMode = DummyMode.WALK;
-	private static ArmorSet armor = ArmorSet.NETHERITE;
 	private static ClientWorld trackedWorld;
 
 	private DummyManager() {}
@@ -34,12 +37,15 @@ public final class DummyManager {
 	public static void clear() {
 		DUMMIES.clear();
 		trackedWorld = null;
+		DummyHud.clear();
+		DummyBoost.reset();
 	}
 
 	/** Forget dummies when the world is swapped out (dimension change, reconnect...). */
 	public static void tick(MinecraftClient client) {
 		if (client.world == null || client.world != trackedWorld) {
 			DUMMIES.clear();
+			DummyHud.clear();
 			trackedWorld = client.world;
 			return;
 		}
@@ -62,7 +68,7 @@ public final class DummyManager {
 			flat = flat.lengthSquared() < 1.0E-4 ? new Vec3d(0.0, 0.0, 1.0) : flat.normalize();
 			pos = new Vec3d(player.getX() + flat.x * 3.0, player.getY(), player.getZ() + flat.z * 3.0);
 		}
-		return spawn(client, pos, modeOrNull != null ? modeOrNull : defaultMode);
+		return spawn(client, pos, modeOrNull != null ? modeOrNull : DummySettings.mode);
 	}
 
 	public static PracticeDummy spawn(MinecraftClient client, Vec3d pos, DummyMode mode) {
@@ -84,7 +90,10 @@ public final class DummyManager {
 		float yaw = (float) (Math.toDegrees(Math.atan2(player.getZ() - pos.z, player.getX() - pos.x)) - 90.0);
 		dummy.refreshPositionAndAngles(pos.x, pos.y, pos.z, yaw, 0.0F);
 		dummy.setHome(pos);
-		armor.applyTo(dummy);
+		dummy.setDisplayName(DummySettings.name);
+		dummy.setSkinOverride(DummySettings.skin);
+		dummy.setMaxHealthValue(DummySettings.maxHealth);
+		applyLoadout(dummy);
 
 		world.addEntity(dummy);
 		DUMMIES.add(dummy);
@@ -100,23 +109,64 @@ public final class DummyManager {
 			}
 		}
 		DUMMIES.clear();
+		DummyHud.clear();
 		return count;
 	}
 
+	// ---------- settings ----------
+	private static void applyLoadout(PracticeDummy dummy) {
+		DummySettings.armor.applyTo(dummy);
+		dummy.equipStack(EquipmentSlot.MAINHAND, DummySettings.hold.stack());
+		dummy.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.TOTEM_OF_UNDYING));
+	}
+
 	public static void setMode(MinecraftClient client, DummyMode mode) {
-		defaultMode = mode;
+		DummySettings.mode = mode;
 		for (PracticeDummy dummy : DUMMIES) dummy.setMode(mode);
 		overlay(client, "\u00a7aDummy: " + mode.description);
 	}
 
 	public static void cycleMode(MinecraftClient client) {
-		setMode(client, defaultMode.next());
+		setMode(client, DummySettings.mode.next());
 	}
 
 	public static void setArmor(MinecraftClient client, ArmorSet set) {
-		armor = set;
-		for (PracticeDummy dummy : DUMMIES) set.applyTo(dummy);
+		DummySettings.armor = set;
+		for (PracticeDummy dummy : DUMMIES) applyLoadout(dummy);
 		overlay(client, "\u00a7aDummy armor: " + set.name().toLowerCase());
+	}
+
+	public static void setHold(MinecraftClient client, HoldItem hold) {
+		DummySettings.hold = hold;
+		for (PracticeDummy dummy : DUMMIES) applyLoadout(dummy);
+		overlay(client, "\u00a7aDummy holds: " + hold.name().toLowerCase());
+	}
+
+	public static void setName(MinecraftClient client, String name) {
+		DummySettings.name = name;
+		for (PracticeDummy dummy : DUMMIES) dummy.setDisplayName(name);
+		overlay(client, "\u00a7aDummy name: " + name);
+	}
+
+	public static void setMaxHealth(MinecraftClient client, float hp) {
+		DummySettings.maxHealth = hp;
+		for (PracticeDummy dummy : DUMMIES) dummy.setMaxHealthValue(hp);
+		overlay(client, "\u00a7aDummy health: " + hp + " HP (" + hp / 2.0F + " hearts)");
+	}
+
+	/** Copy the skin of someone in the tab list (or "self" to go back to yours). Returns false if not found. */
+	public static boolean setSkin(MinecraftClient client, String playerName) {
+		if (playerName.equalsIgnoreCase("self")) {
+			DummySettings.skin = null;
+			for (PracticeDummy dummy : DUMMIES) dummy.setSkinOverride(null);
+			return true;
+		}
+		ClientPlayNetworkHandler handler = client.getNetworkHandler();
+		PlayerListEntry entry = handler == null ? null : handler.getPlayerListEntry(playerName);
+		if (entry == null) return false;
+		DummySettings.skin = entry.getSkinTextures();
+		for (PracticeDummy dummy : DUMMIES) dummy.setSkinOverride(DummySettings.skin);
+		return true;
 	}
 
 	static void overlay(MinecraftClient client, String message) {
