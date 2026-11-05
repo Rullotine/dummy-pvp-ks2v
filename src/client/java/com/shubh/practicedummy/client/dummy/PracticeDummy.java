@@ -8,6 +8,7 @@ import net.minecraft.client.network.OtherClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.MovementType;
 import net.minecraft.entity.player.SkinTextures;
+import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
@@ -16,7 +17,7 @@ import net.minecraft.util.math.Vec3d;
 /**
  * A client-only fake player. It is a real AbstractClientPlayerEntity in the client world, so the
  * game treats it as a player (crosshair targeting, rendering, F3, hitboxes...), but the server never
- * hears about it. Movement, health and totems are simulated here.
+ * hears about it. Movement, health, armor, totems and the shield are simulated here.
  */
 public class PracticeDummy extends OtherClientPlayerEntity {
 	private static final double WALK_SPEED = 0.2;
@@ -28,21 +29,27 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 	private Text displayName = Text.literal("Dummy");
 	private SkinTextures skinOverride;
 
-	// combat state
+	// health / armor
 	private float dummyMaxHealth = 20.0F;
 	private float dummyHealth = 20.0F;
 	private float dummyAbsorption;
 	private int absorptionTicks;
 	private int regenTicks;
 	private int totemPops;
+	private float armorPoints = 20.0F;
+	private float armorToughness = 12.0F;
+
+	// combat state
 	private int iFrames;
 	private boolean knockedBack;
 	private int knockbackAge;
-	// The dummy keeps its own motion vector: the game's remote-player code isn't built to be pushed
-	// around by anything but server packets, so relying on getVelocity() lost the knockback.
-	private double mx, my, mz;
 	private int combo;
 	private int ticksSinceHit = 10_000;
+	private int stunTicks;
+	private int stunAge;
+	// Own motion vector: the game's remote-player code isn't built to be pushed around by anything
+	// but server packets, so relying on getVelocity() lost knockback.
+	private double mx, my, mz;
 
 	// AI state
 	private int wanderTicks;
@@ -91,6 +98,55 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 
 	public void setMode(DummyMode mode) {
 		this.mode = mode;
+		if (mode != DummyMode.STUNPRACTICE) stunTicks = 0;
+	}
+
+	// ---------- shield / stun (shown with the raised-shield pose) ----------
+	public boolean isShieldUp() {
+		return mode == DummyMode.STUNPRACTICE && stunTicks <= 0;
+	}
+
+	public boolean isStunned() {
+		return stunTicks > 0;
+	}
+
+	public int getStunTicks() {
+		return stunTicks;
+	}
+
+	/** Ticks since the shield was disabled (used for the stun-slam reaction time). */
+	public int getStunAge() {
+		return stunAge;
+	}
+
+	public void stun(int ticks) {
+		stunTicks = ticks;
+		stunAge = 0;
+	}
+
+	@Override
+	public boolean isBlocking() {
+		return isShieldUp();
+	}
+
+	@Override
+	public boolean isUsingItem() {
+		return isShieldUp() || super.isUsingItem();
+	}
+
+	@Override
+	public Hand getActiveHand() {
+		return isShieldUp() ? Hand.OFF_HAND : super.getActiveHand();
+	}
+
+	@Override
+	public int getItemUseTimeLeft() {
+		return isShieldUp() ? 72000 : super.getItemUseTimeLeft();
+	}
+
+	@Override
+	public ItemStack getActiveItem() {
+		return isShieldUp() ? getOffHandStack() : super.getActiveItem();
 	}
 
 	// ---------- health / totems ----------
@@ -98,6 +154,19 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		this.dummyMaxHealth = Math.max(1.0F, hp);
 		this.dummyHealth = this.dummyMaxHealth;
 		this.dummyAbsorption = 0.0F;
+	}
+
+	public void setArmorStats(float armor, float toughness) {
+		this.armorPoints = armor;
+		this.armorToughness = toughness;
+	}
+
+	public float getArmorPoints() {
+		return armorPoints;
+	}
+
+	public float getArmorToughness() {
+		return armorToughness;
 	}
 
 	public float getDummyHealth() {
@@ -142,6 +211,11 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		return iFrames <= 0;
 	}
 
+	/** Short immunity after a blocked hit so spam-clicks don't count several times. */
+	public void blockedHit() {
+		iFrames = 6;
+	}
+
 	/** Red hurt flash on the model (the game tints any living entity with hurtTime > 0). */
 	public void flashHurt() {
 		this.maxHurtTime = 10;
@@ -163,20 +237,37 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		knockbackAge = 0;
 	}
 
+	/** Shove the dummy upward (mace smash / wind burst blast). */
+	public void launch(double upward) {
+		my = Math.max(my, upward);
+		knockedBack = true;
+		knockbackAge = 0;
+	}
+
 	/** Called when a hit lands. Returns the current combo count. */
 	public int registerHit() {
 		combo = ticksSinceHit <= 40 ? combo + 1 : 1;
 		ticksSinceHit = 0;
 		iFrames = IFRAMES;
-		knockedBack = true;
-		knockbackAge = 0;
 		return combo;
+	}
+
+	public int getCombo() {
+		return ticksSinceHit <= 40 ? combo : 0;
+	}
+
+	public int getTicksSinceHit() {
+		return ticksSinceHit;
 	}
 
 	@Override
 	public void tick() {
 		if (iFrames > 0) iFrames--;
 		if (ticksSinceHit < 10_000) ticksSinceHit++;
+		if (stunTicks > 0) {
+			stunTicks--;
+			stunAge++;
+		}
 		if (absorptionTicks > 0 && --absorptionTicks == 0) dummyAbsorption = 0.0F;
 		if (regenTicks > 0) {
 			regenTicks--;
@@ -197,6 +288,7 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		boolean hop = false;
 		boolean hasFacing = false;
 		float facing = 0.0F;
+		boolean inWater = isTouchingWater();
 
 		double toPlayerX = 0.0, toPlayerZ = 0.0, dist = 0.0;
 		if (target != null) {
@@ -276,7 +368,7 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 					}
 				}
 			}
-			case STAND -> {
+			case STAND, STUNPRACTICE -> {
 				if (dist > 0.01) {
 					facing = faceTarget;
 					hasFacing = true;
@@ -284,6 +376,8 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 			}
 		}
 
+		// In water, sprinting makes the game switch to the vanilla swimming pose.
+		if (inWater && moving) sprint = true;
 		if (isSprinting() != sprint) setSprinting(sprint);
 
 		double vx = mx, vy = my, vz = mz;
@@ -295,7 +389,7 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 			double drag = ground ? 0.546 : 0.91;
 			vx *= drag;
 			vz *= drag;
-			if (knockbackAge > 3 && ground && Math.hypot(vx, vz) < 0.06) knockedBack = false;
+			if (knockbackAge > 3 && (ground || inWater) && Math.hypot(vx, vz) < 0.06) knockedBack = false;
 			if (knockbackAge > 60) knockedBack = false;
 		} else {
 			double speed = sprint ? WALK_SPEED * 1.3 : WALK_SPEED;
@@ -306,13 +400,20 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 			vz += (tz - vz) * accel;
 		}
 
-		if (isTouchingWater()) {
-			vy = Math.min(vy + 0.04, 0.12); // float up instead of sinking
+		if (inWater) {
+			// swim: follow your depth while fighting, otherwise float near the surface
+			boolean chase = target != null && (mode == DummyMode.FIGHT || mode == DummyMode.STRAFE);
+			double wantDy = chase ? target.getY() - getY() : 0.25;
+			vy += MathHelper.clamp(wantDy * 0.05, -0.05, 0.05);
+			vy *= 0.8;
+			vx *= 0.85;
+			vz *= 0.85;
+			if (horizontalCollision && moving) vy = 0.3; // climb out over the edge
 		} else {
 			vy = (vy - 0.08) * 0.98;
-		}
-		if (ground && !knockedBack && ((horizontalCollision && moving) || hop)) {
-			vy = 0.42; // hop over blocks / bunny-hop while fighting
+			if (ground && !knockedBack && ((horizontalCollision && moving) || hop)) {
+				vy = 0.42; // hop over blocks / bunny-hop while fighting
+			}
 		}
 
 		setVelocity(vx, vy, vz);

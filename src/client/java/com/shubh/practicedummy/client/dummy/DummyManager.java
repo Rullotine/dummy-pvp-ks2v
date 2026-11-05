@@ -27,6 +27,8 @@ public final class DummyManager {
 	// Negative ids can never collide with ids the server hands out.
 	private static int nextEntityId = -1_000_000;
 	private static ClientWorld trackedWorld;
+	/** Set by /dummy gui; the client tick opens the screen after the chat screen has closed. */
+	public static boolean openGuiRequested;
 
 	private DummyManager() {}
 
@@ -37,6 +39,7 @@ public final class DummyManager {
 	public static void clear() {
 		DUMMIES.clear();
 		trackedWorld = null;
+		openGuiRequested = false;
 		DummyHud.clear();
 		DummyBoost.reset();
 	}
@@ -113,16 +116,37 @@ public final class DummyManager {
 		return count;
 	}
 
+	/** The dummy the stats panel talks about: the one you hit most recently, else the nearest. */
+	public static PracticeDummy focus(MinecraftClient client) {
+		PracticeDummy best = null;
+		int bestScore = Integer.MAX_VALUE;
+		ClientPlayerEntity player = client.player;
+		for (PracticeDummy d : DUMMIES) {
+			int score = d.getTicksSinceHit() < 200 ? d.getTicksSinceHit()
+				: 1000 + (player == null ? 0 : (int) player.squaredDistanceTo(d.getX(), d.getY(), d.getZ()));
+			if (score < bestScore) {
+				bestScore = score;
+				best = d;
+			}
+		}
+		return best;
+	}
+
 	// ---------- settings ----------
 	private static void applyLoadout(PracticeDummy dummy) {
 		DummySettings.armor.applyTo(dummy);
 		dummy.equipStack(EquipmentSlot.MAINHAND, DummySettings.hold.stack());
-		dummy.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.TOTEM_OF_UNDYING));
+		// stun practice: shield in the off-hand (raised by the entity itself); otherwise the usual totem
+		dummy.equipStack(EquipmentSlot.OFFHAND, dummy.getMode() == DummyMode.STUNPRACTICE
+			? HoldItem.SHIELD.stack() : new ItemStack(Items.TOTEM_OF_UNDYING));
 	}
 
 	public static void setMode(MinecraftClient client, DummyMode mode) {
 		DummySettings.mode = mode;
-		for (PracticeDummy dummy : DUMMIES) dummy.setMode(mode);
+		for (PracticeDummy dummy : DUMMIES) {
+			dummy.setMode(mode);
+			applyLoadout(dummy);
+		}
 		overlay(client, "\u00a7aDummy: " + mode.description);
 	}
 

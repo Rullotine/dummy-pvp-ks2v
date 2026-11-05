@@ -3,6 +3,8 @@ package com.shubh.practicedummy.client;
 import com.shubh.practicedummy.client.dummy.DummyBoost;
 import com.shubh.practicedummy.client.dummy.DummyHud;
 import com.shubh.practicedummy.client.dummy.DummyManager;
+import com.shubh.practicedummy.client.dummy.DummyStats;
+import com.shubh.practicedummy.client.dummy.DummyTracker;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -28,10 +30,20 @@ public class PracticeDummyClient implements ClientModInitializer {
 		KeyBinding modeKey = KeyBindingHelper.registerKeyBinding(
 			new KeyBinding("key.practicedummy.mode", GLFW.GLFW_KEY_I, category));
 
+		KeyBinding guiKey = KeyBindingHelper.registerKeyBinding(
+			new KeyBinding("key.practicedummy.gui", GLFW.GLFW_KEY_G, category));
+
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			DummyManager.tick(client);
 			DummyHud.tick();
+			DummyStats.tick();
+			DummyTracker.tick(client);
 			DummyBoost.tick(client);
+			if (DummyManager.openGuiRequested && client.currentScreen == null && client.player != null) {
+				DummyManager.openGuiRequested = false;
+				client.setScreen(new DummyScreen());
+			}
+			while (guiKey.wasPressed()) client.setScreen(new DummyScreen());
 			while (spawnKey.wasPressed()) DummyManager.spawnAtCrosshair(client, null);
 			while (removeKey.wasPressed()) {
 				int removed = DummyManager.removeAll(client);
