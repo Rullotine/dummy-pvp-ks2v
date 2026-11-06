@@ -1,0 +1,7 @@
+{
+	"key.category.practicedummy.main": "Practice Dummy",
+	"key.practicedummy.spawn": "Spawn dummy at crosshair",
+	"key.practicedummy.remove": "Remove all dummies",
+	"key.practicedummy.mode": "Cycle dummy behaviour",
+	"key.practicedummy.gui": "Open dummy settings"
+}
