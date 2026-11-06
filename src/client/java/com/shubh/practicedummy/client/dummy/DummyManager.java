@@ -27,8 +27,7 @@ public final class DummyManager {
 	// Negative ids can never collide with ids the server hands out.
 	private static int nextEntityId = -1_000_000;
 	private static ClientWorld trackedWorld;
-	/** Set by /dummy gui; the client tick opens the screen after the chat screen has closed. */
-	public static boolean openGuiRequested;
+	private static PracticeDummy focus;
 
 	private DummyManager() {}
 
@@ -39,9 +38,34 @@ public final class DummyManager {
 	public static void clear() {
 		DUMMIES.clear();
 		trackedWorld = null;
-		openGuiRequested = false;
 		DummyHud.clear();
 		DummyBoost.reset();
+		DummyProjectiles.clear();
+		focus = null;
+	}
+
+	public static void setFocus(PracticeDummy dummy) {
+		focus = dummy;
+	}
+
+	/** The dummy you last hit, else the nearest one. */
+	public static PracticeDummy getFocus() {
+		if (focus != null && !focus.isRemoved() && DUMMIES.contains(focus)) return focus;
+		ClientPlayerEntity p = MinecraftClient.getInstance().player;
+		PracticeDummy best = null;
+		double bd = Double.MAX_VALUE;
+		for (PracticeDummy d : DUMMIES) {
+			double dist = p == null ? 0.0 : d.squaredDistanceTo(p);
+			if (dist < bd) {
+				bd = dist;
+				best = d;
+			}
+		}
+		return best;
+	}
+
+	public static void reapply(MinecraftClient client) {
+		for (PracticeDummy dummy : DUMMIES) applyLoadout(dummy);
 	}
 
 	/** Forget dummies when the world is swapped out (dimension change, reconnect...). */
@@ -113,32 +137,17 @@ public final class DummyManager {
 		}
 		DUMMIES.clear();
 		DummyHud.clear();
+		DummyProjectiles.clear();
+		focus = null;
 		return count;
-	}
-
-	/** The dummy the stats panel talks about: the one you hit most recently, else the nearest. */
-	public static PracticeDummy focus(MinecraftClient client) {
-		PracticeDummy best = null;
-		int bestScore = Integer.MAX_VALUE;
-		ClientPlayerEntity player = client.player;
-		for (PracticeDummy d : DUMMIES) {
-			int score = d.getTicksSinceHit() < 200 ? d.getTicksSinceHit()
-				: 1000 + (player == null ? 0 : (int) player.squaredDistanceTo(d.getX(), d.getY(), d.getZ()));
-			if (score < bestScore) {
-				bestScore = score;
-				best = d;
-			}
-		}
-		return best;
 	}
 
 	// ---------- settings ----------
 	private static void applyLoadout(PracticeDummy dummy) {
 		DummySettings.armor.applyTo(dummy);
-		dummy.equipStack(EquipmentSlot.MAINHAND, DummySettings.hold.stack());
-		// stun practice: shield in the off-hand (raised by the entity itself); otherwise the usual totem
-		dummy.equipStack(EquipmentSlot.OFFHAND, dummy.getMode() == DummyMode.STUNPRACTICE
-			? HoldItem.SHIELD.stack() : new ItemStack(Items.TOTEM_OF_UNDYING));
+		HoldItem hold = dummy.getMode() == DummyMode.STUNPRACTICE ? HoldItem.SHIELD : DummySettings.hold;
+		dummy.equipStack(EquipmentSlot.MAINHAND, hold.stack());
+		dummy.equipStack(EquipmentSlot.OFFHAND, new ItemStack(Items.TOTEM_OF_UNDYING));
 	}
 
 	public static void setMode(MinecraftClient client, DummyMode mode) {

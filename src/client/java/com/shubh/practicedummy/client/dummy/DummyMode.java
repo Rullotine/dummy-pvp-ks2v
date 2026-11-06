@@ -5,8 +5,10 @@ public enum DummyMode {
 	STAND("standing still"),
 	WALK("wandering around"),
 	STRAFE("circle-strafing you"),
-	FIGHT("fighting you (closes in, backs off, hops, swings)"),
-	STUNPRACTICE("stun practice: shield up, facing you (axe it, then slam it)");
+	FIGHT("fighting you (closes in, backs off, hops, swings; archers kite and shoot)"),
+	RUNNER("running away from you (sprint-hit / chase practice)"),
+	JUMPER("bunny-hopping in place (air hits / crit practice)"),
+	STUNPRACTICE("shield up, facing you (axe the shield, then mace-smash: stun slam practice)");
 
 	public final String description;
 

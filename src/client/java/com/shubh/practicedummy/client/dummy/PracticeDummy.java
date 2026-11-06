@@ -1,6 +1,7 @@
 package com.shubh.practicedummy.client.dummy;
 
 import com.mojang.authlib.GameProfile;
+import java.util.ArrayDeque;
 import java.util.Random;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -9,15 +10,15 @@ import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.MovementType;
 import net.minecraft.entity.player.SkinTextures;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 /**
- * A client-only fake player. It is a real AbstractClientPlayerEntity in the client world, so the
- * game treats it as a player (crosshair targeting, rendering, F3, hitboxes...), but the server never
- * hears about it. Movement, health, armor, totems and the shield are simulated here.
+ * A client-only fake player. Movement, health, totems, shield and stats are simulated here;
+ * the server never hears about it.
  */
 public class PracticeDummy extends OtherClientPlayerEntity {
 	private static final double WALK_SPEED = 0.2;
@@ -29,27 +30,31 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 	private Text displayName = Text.literal("Dummy");
 	private SkinTextures skinOverride;
 
-	// health / armor
+	// combat state
 	private float dummyMaxHealth = 20.0F;
 	private float dummyHealth = 20.0F;
 	private float dummyAbsorption;
 	private int absorptionTicks;
 	private int regenTicks;
 	private int totemPops;
-	private float armorPoints = 20.0F;
-	private float armorToughness = 12.0F;
-
-	// combat state
 	private int iFrames;
 	private boolean knockedBack;
 	private int knockbackAge;
+	private double mx, my, mz;
 	private int combo;
 	private int ticksSinceHit = 10_000;
-	private int stunTicks;
-	private int stunAge;
-	// Own motion vector: the game's remote-player code isn't built to be pushed around by anything
-	// but server packets, so relying on getVelocity() lost knockback.
-	private double mx, my, mz;
+
+	// shield / stun practice
+	private int shieldDisabledTicks;
+	private int shieldDisabledAge = -10_000;
+	private int blocks, stuns, stunSlams;
+	private int bestReaction = -1;
+
+	// stats
+	private int hits, crits, smashes, bestCombo, lifeHits, lastPopHits;
+	private float totalDamage, bestHit, bestSmash;
+	private int lifeStartAge, lastPopTicks = -1;
+	private final ArrayDeque<float[]> log = new ArrayDeque<>();
 
 	// AI state
 	private int wanderTicks;
@@ -60,6 +65,8 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 	private int fightPhase;
 	private int hopTicks;
 	private int swingCooldown;
+	private int bowDraw = -1;
+	private int bowCooldown = 30;
 
 	public PracticeDummy(ClientWorld world, GameProfile profile, DummyMode mode) {
 		super(world, profile);
@@ -76,7 +83,6 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		this.displayName = Text.literal(name);
 	}
 
-	/** Own skin by default, or whatever skin was picked with /dummy skin. */
 	@Override
 	public SkinTextures getSkin() {
 		if (skinOverride != null) return skinOverride;
@@ -98,55 +104,6 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 
 	public void setMode(DummyMode mode) {
 		this.mode = mode;
-		if (mode != DummyMode.STUNPRACTICE) stunTicks = 0;
-	}
-
-	// ---------- shield / stun (shown with the raised-shield pose) ----------
-	public boolean isShieldUp() {
-		return mode == DummyMode.STUNPRACTICE && stunTicks <= 0;
-	}
-
-	public boolean isStunned() {
-		return stunTicks > 0;
-	}
-
-	public int getStunTicks() {
-		return stunTicks;
-	}
-
-	/** Ticks since the shield was disabled (used for the stun-slam reaction time). */
-	public int getStunAge() {
-		return stunAge;
-	}
-
-	public void stun(int ticks) {
-		stunTicks = ticks;
-		stunAge = 0;
-	}
-
-	@Override
-	public boolean isBlocking() {
-		return isShieldUp();
-	}
-
-	@Override
-	public boolean isUsingItem() {
-		return isShieldUp() || super.isUsingItem();
-	}
-
-	@Override
-	public Hand getActiveHand() {
-		return isShieldUp() ? Hand.OFF_HAND : super.getActiveHand();
-	}
-
-	@Override
-	public int getItemUseTimeLeft() {
-		return isShieldUp() ? 72000 : super.getItemUseTimeLeft();
-	}
-
-	@Override
-	public ItemStack getActiveItem() {
-		return isShieldUp() ? getOffHandStack() : super.getActiveItem();
 	}
 
 	// ---------- health / totems ----------
@@ -156,34 +113,12 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		this.dummyAbsorption = 0.0F;
 	}
 
-	public void setArmorStats(float armor, float toughness) {
-		this.armorPoints = armor;
-		this.armorToughness = toughness;
-	}
-
-	public float getArmorPoints() {
-		return armorPoints;
-	}
-
-	public float getArmorToughness() {
-		return armorToughness;
-	}
-
-	public float getDummyHealth() {
-		return dummyHealth;
-	}
-
-	public float getDummyMaxHealth() {
-		return dummyMaxHealth;
-	}
-
-	public float getDummyAbsorption() {
-		return dummyAbsorption;
-	}
-
-	public int getTotemPops() {
-		return totemPops;
-	}
+	public float getDummyHealth() { return dummyHealth; }
+	public float getDummyMaxHealth() { return dummyMaxHealth; }
+	public float getDummyAbsorption() { return dummyAbsorption; }
+	public int getTotemPops() { return totemPops; }
+	public int getRegenTicks() { return regenTicks; }
+	public int getAbsorptionTicks() { return absorptionTicks; }
 
 	/** Absorption first, then health. Returns true if this hit would have killed (=> pop a totem). */
 	public boolean applyDamage(float damage) {
@@ -200,23 +135,23 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 	/** Same effects as a real totem: 1 heart, Absorption II for 5s, Regeneration II for 45s. */
 	public void popTotem() {
 		totemPops++;
+		lastPopTicks = Math.max(1, age - lifeStartAge);
+		lastPopHits = lifeHits;
+		lifeHits = 0;
 		dummyHealth = Math.min(1.0F, dummyMaxHealth);
 		dummyAbsorption = 8.0F;
 		absorptionTicks = 100;
 		regenTicks = 900;
 	}
 
+	public float getLastPopSeconds() { return lastPopTicks < 0 ? -1.0F : lastPopTicks / 20.0F; }
+	public int getLastPopHits() { return lastPopHits; }
+
 	// ---------- hit handling ----------
 	public boolean canBeHit() {
 		return iFrames <= 0;
 	}
 
-	/** Short immunity after a blocked hit so spam-clicks don't count several times. */
-	public void blockedHit() {
-		iFrames = 6;
-	}
-
-	/** Red hurt flash on the model (the game tints any living entity with hurtTime > 0). */
 	public void flashHurt() {
 		this.maxHurtTime = 10;
 		this.hurtTime = 10;
@@ -224,6 +159,7 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 
 	/** Vanilla knockback formula: (x, z) points from the dummy toward the attacker. */
 	public void applyKnockback(double strength, double x, double z) {
+		if (DummySettings.armorCalc) strength *= 1.0 - DummySettings.armor.knockbackResist;
 		if (strength <= 0.0) return;
 		while (x * x + z * z < 1.0E-5) {
 			x = (rng.nextDouble() - rng.nextDouble()) * 0.01;
@@ -237,58 +173,151 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		knockbackAge = 0;
 	}
 
-	/** Shove the dummy upward (mace smash / wind burst blast). */
-	public void launch(double upward) {
-		my = Math.max(my, upward);
-		knockedBack = true;
-		knockbackAge = 0;
-	}
-
-	/** Called when a hit lands. Returns the current combo count. */
 	public int registerHit() {
 		combo = ticksSinceHit <= 40 ? combo + 1 : 1;
 		ticksSinceHit = 0;
 		iFrames = IFRAMES;
+		knockedBack = true;
+		knockbackAge = 0;
+		bestCombo = Math.max(bestCombo, combo);
 		return combo;
 	}
 
-	public int getCombo() {
-		return ticksSinceHit <= 40 ? combo : 0;
+	// ---------- shield ----------
+	/** Shield is up whenever the dummy holds one and it isn't disabled. */
+	public boolean isShieldUp() {
+		return shieldDisabledTicks <= 0 && getMainHandStack().isOf(Items.SHIELD);
 	}
 
-	public int getTicksSinceHit() {
-		return ticksSinceHit;
+	public boolean hasShield() {
+		return getMainHandStack().isOf(Items.SHIELD);
+	}
+
+	public boolean isShieldDisabled() {
+		return shieldDisabledTicks > 0;
+	}
+
+	public int getShieldDisabledTicks() { return shieldDisabledTicks; }
+	public int getTicksSinceShieldDisabled() { return age - shieldDisabledAge; }
+
+	public void disableShield(int ticks) {
+		shieldDisabledTicks = ticks;
+		shieldDisabledAge = age;
+		stuns++;
+	}
+
+	public void noteBlocked() { blocks++; }
+
+	public void recordStunSlam(int reactionTicks) {
+		stunSlams++;
+		if (bestReaction < 0 || reactionTicks < bestReaction) bestReaction = reactionTicks;
+	}
+
+	public int getBlocks() { return blocks; }
+	public int getStuns() { return stuns; }
+	public int getStunSlams() { return stunSlams; }
+	public int getBestReaction() { return bestReaction; }
+
+	/** True if (ax, az) is in front of the dummy (the 180 degrees a shield covers). */
+	public boolean isFacing(double ax, double az) {
+		double dx = ax - getX(), dz = az - getZ();
+		double len = Math.sqrt(dx * dx + dz * dz);
+		if (len < 1.0E-4) return true;
+		double yaw = Math.toRadians(getYaw());
+		return (dx * -Math.sin(yaw) + dz * Math.cos(yaw)) / len > 0.0;
+	}
+
+	// ---------- stats ----------
+	public void recordHit(float dmg, boolean crit, boolean smash) {
+		hits++;
+		totalDamage += dmg;
+		bestHit = Math.max(bestHit, dmg);
+		if (crit) crits++;
+		if (smash) {
+			smashes++;
+			bestSmash = Math.max(bestSmash, dmg);
+		}
+		if (lifeHits++ == 0) lifeStartAge = age;
+		log.addLast(new float[] {age, dmg});
+	}
+
+	public float getDps() {
+		while (!log.isEmpty() && age - log.peekFirst()[0] > 100) log.removeFirst();
+		if (log.isEmpty()) return 0.0F;
+		float sum = 0.0F;
+		for (float[] e : log) sum += e[1];
+		float window = MathHelper.clamp((age - log.peekFirst()[0]) / 20.0F, 1.0F, 5.0F);
+		return sum / window;
+	}
+
+	public int getHits() { return hits; }
+	public int getCrits() { return crits; }
+	public int getSmashes() { return smashes; }
+	public float getTotalDamage() { return totalDamage; }
+	public float getBestHit() { return bestHit; }
+	public float getBestSmash() { return bestSmash; }
+	public int getBestCombo() { return bestCombo; }
+	public int getCombo() { return ticksSinceHit <= 40 ? combo : 0; }
+
+	public void resetStats() {
+		hits = crits = smashes = bestCombo = lifeHits = lastPopHits = 0;
+		totalDamage = bestHit = bestSmash = 0.0F;
+		totemPops = 0;
+		lastPopTicks = -1;
+		blocks = stuns = stunSlams = 0;
+		bestReaction = -1;
+		log.clear();
 	}
 
 	@Override
 	public void tick() {
 		if (iFrames > 0) iFrames--;
 		if (ticksSinceHit < 10_000) ticksSinceHit++;
-		if (stunTicks > 0) {
-			stunTicks--;
-			stunAge++;
-		}
+		if (shieldDisabledTicks > 0) shieldDisabledTicks--;
 		if (absorptionTicks > 0 && --absorptionTicks == 0) dummyAbsorption = 0.0F;
 		if (regenTicks > 0) {
 			regenTicks--;
 			if (regenTicks % 25 == 0 && dummyHealth < dummyMaxHealth) {
 				dummyHealth = Math.min(dummyMaxHealth, dummyHealth + 1.0F);
 			}
+		} else if (DummySettings.autoHeal && ticksSinceHit > 100 && dummyHealth < dummyMaxHealth && age % 4 == 0) {
+			dummyHealth = Math.min(dummyMaxHealth, dummyHealth + 1.0F);
+			if (dummyHealth >= dummyMaxHealth) lifeHits = 0;
 		}
 		simulateMovement();
-		super.tick(); // after moving, so limb/walk animation sees the movement
+		syncUsePose(isShieldUp() || bowDraw >= 0);
+		super.tick();
+	}
+
+	/** Raise the shield / draw the bow visually. Remote players need the "using item" flag set by hand. */
+	private void syncUsePose(boolean want) {
+		if (want && !isUsingItem()) {
+			setCurrentHand(Hand.MAIN_HAND);
+			if (!isUsingItem()) setLivingFlag(1, true);
+		} else if (!want && isUsingItem()) {
+			clearActiveItem();
+			if (isUsingItem()) setLivingFlag(1, false);
+		}
+	}
+
+	/** Vanilla attack speed -> ticks between swings. */
+	private int attackInterval() {
+		ItemStack s = getMainHandStack();
+		if (s.isEmpty()) return 5;
+		String path = net.minecraft.registry.Registries.ITEM.getId(s.getItem()).getPath();
+		if (s.isOf(Items.MACE)) return 33;        // 0.6 attacks/s
+		if (path.endsWith("_axe")) return 20;     // 1.0 attacks/s
+		if (path.endsWith("_sword")) return 13;   // 1.6 attacks/s
+		if (path.endsWith("_spear")) return 17;   // approximate
+		return 5;
 	}
 
 	// ---------- movement / AI ----------
 	private void simulateMovement() {
 		ClientPlayerEntity target = MinecraftClient.getInstance().player;
 		double dirX = 0.0, dirZ = 0.0;
-		boolean moving = false;
-		boolean sprint = false;
-		boolean hop = false;
-		boolean hasFacing = false;
+		boolean moving = false, sprint = false, hop = false, hasFacing = false;
 		float facing = 0.0F;
-		boolean inWater = isTouchingWater();
 
 		double toPlayerX = 0.0, toPlayerZ = 0.0, dist = 0.0;
 		if (target != null) {
@@ -299,6 +328,8 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		double nx = dist > 0.01 ? toPlayerX / dist : 0.0;
 		double nz = dist > 0.01 ? toPlayerZ / dist : 0.0;
 		float faceTarget = (float) (Math.toDegrees(Math.atan2(toPlayerZ, toPlayerX)) - 90.0);
+		boolean inWater = isTouchingWater();
+		boolean archer = getMainHandStack().isOf(Items.BOW);
 
 		switch (mode) {
 			case WALK -> {
@@ -307,7 +338,7 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 					pausing = rng.nextInt(4) == 0;
 					wanderAngle = rng.nextDouble() * Math.PI * 2.0;
 					double hx = home.x - getX(), hz = home.z - getZ();
-					if (hx * hx + hz * hz > 36.0) wanderAngle = Math.atan2(hz, hx); // drift back home
+					if (hx * hx + hz * hz > 36.0) wanderAngle = Math.atan2(hz, hx);
 				}
 				if (!pausing) {
 					dirX = Math.cos(wanderAngle);
@@ -339,11 +370,16 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 				}
 				if (dist > 0.01) {
 					double side, radial;
-					switch (fightPhase) {
-						case 0 -> { side = 1.0; radial = (dist - 2.6) * 0.8; }          // circle, hold range
-						case 1 -> { side = 0.5; radial = (dist - 2.0) * 1.0; }          // push in
-						case 2 -> { side = 0.3; radial = (dist - 4.2) * 1.0; }          // back off
-						default -> { side = 0.8; radial = (dist - 3.0) * 0.8; }
+					if (archer) {
+						side = 0.8;
+						radial = (dist - 12.0) * 0.5; // kite at range
+					} else {
+						switch (fightPhase) {
+							case 0 -> { side = 1.0; radial = (dist - 2.6) * 0.8; }
+							case 1 -> { side = 0.5; radial = (dist - 2.0) * 1.0; }
+							case 2 -> { side = 0.3; radial = (dist - 4.2) * 1.0; }
+							default -> { side = 0.8; radial = (dist - 3.0) * 0.8; }
+						}
 					}
 					radial = MathHelper.clamp(radial, -1.0, 1.0);
 					dirX = -nz * side * strafeDir + nx * radial;
@@ -358,14 +394,59 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 					facing = faceTarget;
 					hasFacing = true;
 
-					if (--hopTicks <= 0) {
-						hopTicks = 10 + rng.nextInt(20);
-						hop = true;
+					if (archer) {
+						if (bowDraw < 0) {
+							if (--bowCooldown <= 0 && dist < 40.0 && target != null) bowDraw = 0;
+						} else if (++bowDraw >= 20 && target != null) {
+							DummyProjectiles.shoot(this, target);
+							swingHand(Hand.MAIN_HAND);
+							bowDraw = -1;
+							bowCooldown = 15 + rng.nextInt(25);
+						}
+					} else {
+						bowDraw = -1;
+						if (--hopTicks <= 0) {
+							hopTicks = 10 + rng.nextInt(20);
+							hop = !isShieldUp();
+						}
+						// vanilla reach is 3 blocks, and swings follow the weapon's attack speed
+						if (swingCooldown > 0) swingCooldown--;
+						if (dist < 3.0 && swingCooldown <= 0 && !isShieldUp()) {
+							swingCooldown = attackInterval() + rng.nextInt(3);
+							swingHand(Hand.MAIN_HAND);
+						}
 					}
-					if (dist < 3.6 && --swingCooldown <= 0) {
-						swingCooldown = 8 + rng.nextInt(8);
-						swingHand(Hand.MAIN_HAND);
+				}
+			}
+			case RUNNER -> {
+				if (--strafeTicks <= 0) {
+					strafeTicks = 10 + rng.nextInt(20);
+					strafeDir = -strafeDir;
+				}
+				if (dist > 0.01) {
+					double flee = dist < 9.0 ? 1.0 : 0.0;
+					double side = horizontalCollision ? 1.0 : 0.25;
+					dirX = -nx * flee - nz * side * strafeDir;
+					dirZ = -nz * flee + nx * side * strafeDir;
+					double len = Math.sqrt(dirX * dirX + dirZ * dirZ);
+					if (len > 1.0) {
+						dirX /= len;
+						dirZ /= len;
 					}
+					moving = len > 0.05;
+					sprint = moving;
+					facing = (float) (Math.toDegrees(Math.atan2(dirZ, dirX)) - 90.0);
+					hasFacing = moving;
+				}
+			}
+			case JUMPER -> {
+				if (dist > 0.01) {
+					facing = faceTarget;
+					hasFacing = true;
+				}
+				if (--hopTicks <= 0) {
+					hopTicks = 8 + rng.nextInt(8);
+					hop = true;
 				}
 			}
 			case STAND, STUNPRACTICE -> {
@@ -376,24 +457,28 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 			}
 		}
 
-		// In water, sprinting makes the game switch to the vanilla swimming pose.
-		if (inWater && moving) sprint = true;
+		if (bowDraw >= 0 && target != null) {
+			facing = faceTarget;
+			hasFacing = true;
+		}
+		boolean swimming = inWater && DummySettings.swim;
+		if (swimming && moving) sprint = true; // sprint + water = vanilla swimming pose
 		if (isSprinting() != sprint) setSprinting(sprint);
 
 		double vx = mx, vy = my, vz = mz;
 		boolean ground = isOnGround();
 
 		if (knockedBack) {
-			// let knockback play out exactly like vanilla: ground/air drag only, no AI steering
 			knockbackAge++;
-			double drag = ground ? 0.546 : 0.91;
+			double drag = inWater ? 0.8 : ground ? 0.546 : 0.91;
 			vx *= drag;
 			vz *= drag;
 			if (knockbackAge > 3 && (ground || inWater) && Math.hypot(vx, vz) < 0.06) knockedBack = false;
 			if (knockbackAge > 60) knockedBack = false;
 		} else {
 			double speed = sprint ? WALK_SPEED * 1.3 : WALK_SPEED;
-			double accel = ground ? 0.6 : 0.15;
+			if (inWater) speed *= sprint ? 0.8 : 0.5;
+			double accel = inWater ? 0.2 : ground ? 0.6 : 0.15;
 			double tx = moving ? dirX * speed : 0.0;
 			double tz = moving ? dirZ * speed : 0.0;
 			vx += (tx - vx) * accel;
@@ -401,29 +486,31 @@ public class PracticeDummy extends OtherClientPlayerEntity {
 		}
 
 		if (inWater) {
-			// swim: follow your depth while fighting, otherwise float near the surface
-			boolean chase = target != null && (mode == DummyMode.FIGHT || mode == DummyMode.STRAFE);
-			double wantDy = chase ? target.getY() - getY() : 0.25;
-			vy += MathHelper.clamp(wantDy * 0.05, -0.05, 0.05);
-			vy *= 0.8;
-			vx *= 0.85;
-			vz *= 0.85;
-			if (horizontalCollision && moving) vy = 0.3; // climb out over the edge
+			if (swimming) {
+				double want = 0.02; // neutral buoyancy
+				boolean chase = target != null && (mode == DummyMode.FIGHT || mode == DummyMode.STRAFE);
+				if (chase) want += MathHelper.clamp((target.getY() - getY()) * 0.05, -0.06, 0.06);
+				else if (isSubmergedInWater()) want = 0.06; // surface and bob
+				vy = vy * 0.8 - 0.02 + want;
+				if (horizontalCollision && moving) vy = Math.max(vy, 0.3); // climb out onto ledges
+			} else {
+				vy = Math.min(vy + 0.04, 0.12);
+			}
 		} else {
 			vy = (vy - 0.08) * 0.98;
-			if (ground && !knockedBack && ((horizontalCollision && moving) || hop)) {
-				vy = 0.42; // hop over blocks / bunny-hop while fighting
-			}
+		}
+		if (ground && !knockedBack && !inWater && ((horizontalCollision && moving) || hop)) {
+			vy = 0.42;
 		}
 
 		setVelocity(vx, vy, vz);
 		move(MovementType.SELF, new Vec3d(vx, vy, vz));
-		Vec3d after = getVelocity(); // move() zeroes the axes we ran into
+		Vec3d after = getVelocity();
 		mx = after.x;
 		my = after.y;
 		mz = after.z;
 
-		if (getY() < home.y - 64.0) { // fell into the void
+		if (getY() < home.y - 64.0) {
 			setPosition(home.x, home.y, home.z);
 			setVelocity(Vec3d.ZERO);
 			mx = 0.0;

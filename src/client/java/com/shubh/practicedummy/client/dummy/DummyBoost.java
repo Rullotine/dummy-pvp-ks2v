@@ -5,115 +5,113 @@ import java.util.UUID;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.enchantment.Enchantments;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.server.integrated.IntegratedServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
-import net.minecraft.text.Text;
 import net.minecraft.util.math.Vec3d;
 
 /**
- * Mace-smash launch (Wind Burst), fall-damage cancel and the "peak height" readout.
- *
- * - Single-player: the launch is applied directly (the integrated server just accepts it).
- * - Multiplayer: the client never forces its own velocity. If you turn on /dummy boost server on and
- *   you have command permission there (op / your own server), it asks the SERVER to launch you by
- *   summoning real wind charges under you, so the server itself grants the boost.
+ * Mace-smash launch (Wind Burst) and fall-damage cancel.
+ * Level is read from the mace you hold (auto) or forced with /dummy windburst.
+ * Single-player applies the launch directly; multiplayer only works through /dummy boost server.
  */
 public final class DummyBoost {
-	/** Upward launch speed per Wind Burst level (0 = no enchant: just a tiny bounce). Approximate. */
 	private static final double[] LAUNCH = {0.01, 1.25, 1.55, 1.85};
-	private static final String[] ROMAN = {"", "I", "II", "III"};
 
 	private static boolean noFall;
 	private static int groundTicks;
 	private static boolean warnedMultiplayer;
 	private static int lastServerBoostTick = -100;
 
-	private static boolean trackingPeak;
-	private static double peakStartY;
-	private static double peakY;
+	// HUD info
+	private static int chain;
+	private static double startY, peakY;
+	private static int hudTicks;
+	private static int usedLevel;
 
 	private DummyBoost() {}
 
-	/** Returns a short readout tag, or null. */
-	public static String onSmash(MinecraftClient mc, ClientPlayerEntity player, int level, double fall) {
+	public static int resolveLevel(ClientPlayerEntity player) {
+		int level = DummySettings.windBurst >= 0
+			? DummySettings.windBurst
+			: DummyCombat.enchantLevel(player.getMainHandStack(), Enchantments.WIND_BURST);
+		return Math.max(0, Math.min(3, level));
+	}
+
+	public static String levelLabel(ClientPlayerEntity player) {
+		int l = resolveLevel(player);
+		return (l == 0 ? "no Wind Burst" : "Wind Burst " + DummyCombat.roman(l)) + (DummySettings.windBurst < 0 ? " (auto)" : "");
+	}
+
+	public static int getChain() { return chain; }
+	public static int getHudTicks() { return hudTicks; }
+	public static int getUsedLevel() { return usedLevel; }
+	public static double getPeakHeight() { return Math.max(0.0, peakY - startY); }
+
+	public static String onSmash(MinecraftClient mc, ClientPlayerEntity player) {
 		if (!DummySettings.boost) return null;
-		level = Math.max(0, Math.min(3, level));
+		int level = resolveLevel(player);
 		if (!mc.isInSingleplayer()) {
 			if (DummySettings.serverBoost && level > 0) return askServer(mc, player, level);
 			if (warnedMultiplayer) return null;
 			warnedMultiplayer = true;
 			return "boost: single-player only (see /dummy boost server)";
 		}
-
+		boolean chained = !player.isOnGround() && noFall;
+		chain = chained ? chain + 1 : 1;
 		Vec3d v = player.getVelocity();
-		double hx = 0.0, hz = 0.0;
-		if (DummySettings.windLook && level > 0) { // chain-friendly: shove you forward too
-			Vec3d look = player.getRotationVector();
-			hx = look.x * 0.35 * level;
-			hz = look.z * 0.35 * level;
-		}
-		player.setVelocity(v.x + hx, LAUNCH[level], v.z + hz);
+		player.setVelocity(v.x, LAUNCH[level], v.z);
 		player.fallDistance = 0.0;
 		noFall = true;
 		groundTicks = 0;
-
-		// peak-height tracking for the readout
-		trackingPeak = level > 0;
-		peakStartY = player.getY();
-		peakY = peakStartY;
-
-		// flashy gust + sound
-		ClientWorld world = mc.world;
-		if (world != null && level > 0) {
-			world.addParticleClient(level >= 2 ? ParticleTypes.GUST_EMITTER_LARGE : ParticleTypes.GUST_EMITTER_SMALL,
-				false, false, player.getX(), player.getY() + 0.1, player.getZ(), 0.0, 0.0, 0.0);
-			world.playSoundClient(player.getX(), player.getY(), player.getZ(),
-				SoundEvents.ENTITY_WIND_CHARGE_WIND_BURST, SoundCategory.PLAYERS, 1.0F, 0.9F + level * 0.1F, false);
-		}
-		return level == 0 ? "SMASH BOUNCE" : "WIND BURST " + ROMAN[level];
+		startY = player.getY();
+		peakY = startY;
+		usedLevel = level;
+		hudTicks = 120;
+		burstFx(mc.world, player, level);
+		String tag = level == 0 ? "SMASH BOUNCE" : "WIND BURST " + DummyCombat.roman(level);
+		return chain > 1 ? tag + " \u00a7dCHAIN x" + chain : tag;
 	}
 
-	/** Multiplayer: have the server summon wind charges just under you; they hit you and explode. */
+	private static void burstFx(ClientWorld world, ClientPlayerEntity p, int level) {
+		if (world == null || level == 0) return;
+		world.playSoundClient(p.getX(), p.getY(), p.getZ(), SoundEvents.ITEM_MACE_SMASH_GROUND_HEAVY,
+			SoundCategory.PLAYERS, 1.0F, 1.3F, false);
+		int n = 14 + level * 8;
+		for (int i = 0; i < n; i++) {
+			double a = i / (double) n * Math.PI * 2.0;
+			double sp = 0.25 + 0.08 * level;
+			world.addParticleClient(ParticleTypes.CLOUD, false, false, p.getX(), p.getY() + 0.1, p.getZ(),
+				Math.cos(a) * sp, 0.05, Math.sin(a) * sp);
+			world.addParticleClient(ParticleTypes.POOF, false, false, p.getX(), p.getY() + 0.1, p.getZ(),
+				Math.cos(a) * sp * 0.5, 0.2 + 0.05 * level, Math.sin(a) * sp * 0.5);
+		}
+	}
+
 	private static String askServer(MinecraftClient mc, ClientPlayerEntity player, int level) {
 		if (mc.getNetworkHandler() == null) return null;
 		int now = player.age;
-		if (now - lastServerBoostTick < 15) return null; // don't spam commands
+		if (now - lastServerBoostTick < 15) return null;
 		lastServerBoostTick = now;
 		for (int i = 0; i < level; i++) {
 			mc.getNetworkHandler().sendChatCommand("summon minecraft:wind_charge ~ ~-1.2 ~ {Motion:[0.0,1.2,0.0]}");
 		}
-		return "WIND BURST " + ROMAN[level] + " (server)";
+		return "WIND BURST " + DummyCombat.roman(level) + " (server)";
 	}
 
 	public static void tick(MinecraftClient mc) {
-		ClientPlayerEntity player = mc.player;
-		if (player == null) {
-			noFall = false;
-			trackingPeak = false;
-			return;
-		}
-
-		if (trackingPeak) {
-			if (player.getY() > peakY) peakY = player.getY();
-			boolean falling = player.getVelocity().y <= 0.0 && peakY > peakStartY + 0.5;
-			if (falling || player.isOnGround() && peakY > peakStartY + 0.5) {
-				trackingPeak = false;
-				if (mc.inGameHud != null) {
-					mc.inGameHud.setOverlayMessage(Text.literal("\u00a7bWind Burst peak: +"
-						+ String.format(Locale.ROOT, "%.1f", peakY - peakStartY) + " blocks"), false);
-				}
-			}
-		}
-
+		if (hudTicks > 0) hudTicks--;
 		if (!noFall) return;
+		ClientPlayerEntity player = mc.player;
 		IntegratedServer server = mc.getServer();
-		if (server == null) {
+		if (player == null || server == null) {
 			noFall = false;
 			return;
 		}
+		peakY = Math.max(peakY, player.getY());
 		UUID id = player.getUuid();
 		server.execute(() -> {
 			ServerPlayerEntity sp = server.getPlayerManager().getPlayer(id);
@@ -121,7 +119,10 @@ public final class DummyBoost {
 		});
 		player.fallDistance = 0.0;
 		if (player.isOnGround()) {
-			if (++groundTicks > 2) noFall = false;
+			if (++groundTicks > 2) {
+				noFall = false;
+				chain = 0;
+			}
 		} else {
 			groundTicks = 0;
 		}
@@ -129,6 +130,11 @@ public final class DummyBoost {
 
 	public static void reset() {
 		noFall = false;
-		trackingPeak = false;
+		chain = 0;
+		hudTicks = 0;
+	}
+
+	public static String heightText() {
+		return String.format(Locale.ROOT, "%.1f", getPeakHeight());
 	}
 }

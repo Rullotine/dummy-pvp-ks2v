@@ -4,19 +4,18 @@ import com.shubh.practicedummy.client.dummy.ArmorSet;
 import com.shubh.practicedummy.client.dummy.DummyManager;
 import com.shubh.practicedummy.client.dummy.DummyMode;
 import com.shubh.practicedummy.client.dummy.DummySettings;
-import com.shubh.practicedummy.client.dummy.DummyStats;
 import com.shubh.practicedummy.client.dummy.HoldItem;
+import com.shubh.practicedummy.client.dummy.PracticeDummy;
 import java.util.Locale;
 import java.util.function.Supplier;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.text.Text;
 
-/** Settings screen: every button cycles / toggles its setting and updates its own label. */
+/** Click-through settings screen (default key: G, or /dummy gui). */
 public class DummyScreen extends Screen {
-	private static final float[] HEALTH_PRESETS = {10.0F, 20.0F, 40.0F, 100.0F, 1000.0F};
+	private static final float[] HEALTH_PRESETS = {10.0F, 20.0F, 40.0F, 100.0F, 500.0F};
 
 	public DummyScreen() {
 		super(Text.literal("Practice Dummy"));
@@ -24,97 +23,87 @@ public class DummyScreen extends Screen {
 
 	@Override
 	protected void init() {
-		int colW = 150, gap = 8, rowH = 24;
-		int left = this.width / 2 - colW - gap / 2;
-		int right = this.width / 2 + gap / 2;
-		int y = 36;
+		int cw = 150, gap = 6, step = 24;
+		int x1 = this.width / 2 - cw - gap / 2;
+		int x2 = this.width / 2 + gap / 2;
+		int y = 34;
 
-		MinecraftClient mc = MinecraftClient.getInstance();
-
-		button(left, y, colW, () -> "Behaviour: " + DummySettings.mode.name().toLowerCase(Locale.ROOT),
-			() -> DummyManager.setMode(mc, DummySettings.mode.next()));
-		button(right, y, colW, () -> "Holds: " + DummySettings.hold.name().toLowerCase(Locale.ROOT),
-			() -> DummyManager.setHold(mc, next(HoldItem.values(), DummySettings.hold)));
-		y += rowH;
-
-		button(left, y, colW, () -> "Armor: " + DummySettings.armor.name().toLowerCase(Locale.ROOT),
-			() -> DummyManager.setArmor(mc, next(ArmorSet.values(), DummySettings.armor)));
-		button(right, y, colW, () -> "Protection: " + DummySettings.protection,
-			() -> DummySettings.protection = (DummySettings.protection + 1) % 5);
-		y += rowH;
-
-		button(left, y, colW, () -> "Dummy HP: " + (int) DummySettings.maxHealth,
-			() -> DummyManager.setMaxHealth(mc, nextHealth()));
-		button(right, y, colW, () -> "Stun time: " + String.format(Locale.ROOT, "%.1fs", DummySettings.stunTicks / 20.0F),
-			() -> DummySettings.stunTicks = DummySettings.stunTicks >= 160 ? 40 : DummySettings.stunTicks + 20);
-		y += rowH;
-
-		button(left, y, colW, () -> "Wind Burst: " + DummySettings.windBurst,
-			() -> DummySettings.windBurst = (DummySettings.windBurst + 1) % 4);
-		button(right, y, colW, () -> "Boost (single-player): " + onOff(DummySettings.boost),
-			() -> DummySettings.boost = !DummySettings.boost);
-		y += rowH;
-
-		button(left, y, colW, () -> "Boost looks forward: " + onOff(DummySettings.windLook),
-			() -> DummySettings.windLook = !DummySettings.windLook);
-		button(right, y, colW, () -> "Server boost (op): " + onOff(DummySettings.serverBoost),
-			() -> DummySettings.serverBoost = !DummySettings.serverBoost);
-		y += rowH;
-
-		button(left, y, colW, () -> "Sim Breach: " + DummySettings.simBreach,
-			() -> DummySettings.simBreach = (DummySettings.simBreach + 1) % 5);
-		button(right, y, colW, () -> "Sim Density: " + DummySettings.simDensity,
-			() -> DummySettings.simDensity = (DummySettings.simDensity + 1) % 6);
-		y += rowH;
-
-		button(left, y, colW, () -> "Sim Sharpness: " + DummySettings.simSharpness,
-			() -> DummySettings.simSharpness = (DummySettings.simSharpness + 1) % 6);
-		button(right, y, colW, () -> "HUD & bars: " + onOff(DummySettings.hud),
-			() -> DummySettings.hud = !DummySettings.hud);
-		y += rowH + 6;
-
-		button(left, y, colW, () -> "Spawn at crosshair", () -> {
-			close();
-			DummyManager.spawnAtCrosshair(mc, null);
+		cycle(x1, y, "Mode", () -> DummySettings.mode.name().toLowerCase(Locale.ROOT),
+			() -> DummyManager.cycleMode(this.client));
+		cycle(x2, y, "Armor", () -> DummySettings.armor.name().toLowerCase(Locale.ROOT), () -> {
+			ArmorSet[] v = ArmorSet.values();
+			DummyManager.setArmor(this.client, v[(DummySettings.armor.ordinal() + 1) % v.length]);
 		});
-		button(right, y, colW, () -> "Remove all dummies", () -> DummyManager.removeAll(mc));
-		y += rowH;
-
-		button(left, y, colW, () -> "Reset stats", DummyStats::reset);
-		button(right, y, colW, () -> "Done", this::close);
+		y += step;
+		cycle(x1, y, "Holds", () -> DummySettings.hold.name().toLowerCase(Locale.ROOT), () -> {
+			HoldItem[] v = HoldItem.values();
+			DummyManager.setHold(this.client, v[(DummySettings.hold.ordinal() + 1) % v.length]);
+		});
+		cycle(x2, y, "Protection", () -> String.valueOf(DummySettings.protection),
+			() -> DummySettings.protection = (DummySettings.protection + 1) % 5);
+		y += step;
+		cycle(x1, y, "Wind Burst", () -> DummySettings.windBurst < 0 ? "auto" : String.valueOf(DummySettings.windBurst),
+			() -> DummySettings.windBurst = DummySettings.windBurst >= 3 ? -1 : DummySettings.windBurst + 1);
+		cycle(x2, y, "Mace boost", () -> onOff(DummySettings.boost), () -> DummySettings.boost = !DummySettings.boost);
+		y += step;
+		cycle(x1, y, "Swimming", () -> onOff(DummySettings.swim), () -> DummySettings.swim = !DummySettings.swim);
+		cycle(x2, y, "Armor math", () -> onOff(DummySettings.armorCalc), () -> DummySettings.armorCalc = !DummySettings.armorCalc);
+		y += step;
+		cycle(x1, y, "Auto-heal", () -> onOff(DummySettings.autoHeal), () -> DummySettings.autoHeal = !DummySettings.autoHeal);
+		cycle(x2, y, "Glint", () -> onOff(DummySettings.glint), () -> {
+			DummySettings.glint = !DummySettings.glint;
+			DummyManager.reapply(this.client);
+		});
+		y += step;
+		cycle(x1, y, "Status HUD", () -> onOff(DummySettings.hudBars), () -> DummySettings.hudBars = !DummySettings.hudBars);
+		cycle(x2, y, "Health", () -> String.format(Locale.ROOT, "%.0f", DummySettings.maxHealth), () -> {
+			float next = HEALTH_PRESETS[0];
+			for (float p : HEALTH_PRESETS) {
+				if (p > DummySettings.maxHealth + 0.01F) {
+					next = p;
+					break;
+				}
+			}
+			DummyManager.setMaxHealth(this.client, next);
+		});
+		y += step + 6;
+		action(x1, y, "Spawn at crosshair", () -> {
+			close();
+			DummyManager.spawnAtCrosshair(this.client, null);
+		});
+		action(x2, y, "Remove all", () -> DummyManager.removeAll(this.client));
+		y += step;
+		action(x1, y, "Reset stats", () -> {
+			for (PracticeDummy d : DummyManager.all()) d.resetStats();
+		});
+		action(x2, y, "Done", this::close);
 	}
 
-	private void button(int x, int y, int w, Supplier<String> label, Runnable action) {
-		ButtonWidget[] holder = new ButtonWidget[1];
-		holder[0] = ButtonWidget.builder(Text.literal(label.get()), b -> {
-			action.run();
-			b.setMessage(Text.literal(label.get()));
-		}).dimensions(x, y, w, 20).build();
-		addDrawableChild(holder[0]);
+	private static String onOff(boolean v) {
+		return v ? "on" : "off";
 	}
 
-	private static String onOff(boolean value) {
-		return value ? "ON" : "OFF";
+	private void cycle(int x, int y, String label, Supplier<String> value, Runnable onClick) {
+		addDrawableChild(ButtonWidget.builder(Text.literal(label + ": " + value.get()), b -> {
+			onClick.run();
+			b.setMessage(Text.literal(label + ": " + value.get()));
+		}).dimensions(x, y, 150, 20).build());
 	}
 
-	private static <T> T next(T[] values, T current) {
-		for (int i = 0; i < values.length; i++) {
-			if (values[i] == current) return values[(i + 1) % values.length];
-		}
-		return values[0];
-	}
-
-	private static float nextHealth() {
-		for (int i = 0; i < HEALTH_PRESETS.length; i++) {
-			if (HEALTH_PRESETS[i] > DummySettings.maxHealth + 0.01F) return HEALTH_PRESETS[i];
-		}
-		return HEALTH_PRESETS[0];
+	private void action(int x, int y, String label, Runnable onClick) {
+		addDrawableChild(ButtonWidget.builder(Text.literal(label), b -> onClick.run())
+			.dimensions(x, y, 150, 20).build());
 	}
 
 	@Override
-	public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-		super.render(ctx, mouseX, mouseY, delta);
-		ctx.drawCenteredTextWithShadow(MinecraftClient.getInstance().textRenderer,
-			Text.literal("Practice Dummy"), this.width / 2, 14, 0xFFFFFFFF);
+	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+		super.render(context, mouseX, mouseY, delta);
+		String title = "Practice Dummy";
+		context.drawTextWithShadow(this.textRenderer, title, this.width / 2 - this.textRenderer.getWidth(title) / 2, 16, 0xFFFFFFFF);
+	}
+
+	@Override
+	public boolean shouldPause() {
+		return false;
 	}
 }

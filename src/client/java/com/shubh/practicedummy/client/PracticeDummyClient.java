@@ -1,10 +1,10 @@
 package com.shubh.practicedummy.client;
 
 import com.shubh.practicedummy.client.dummy.DummyBoost;
+import com.shubh.practicedummy.client.dummy.DummyCombat;
+import com.shubh.practicedummy.client.dummy.DummyProjectiles;
 import com.shubh.practicedummy.client.dummy.DummyHud;
 import com.shubh.practicedummy.client.dummy.DummyManager;
-import com.shubh.practicedummy.client.dummy.DummyStats;
-import com.shubh.practicedummy.client.dummy.DummyTracker;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -18,6 +18,8 @@ import org.lwjgl.glfw.GLFW;
 
 public class PracticeDummyClient implements ClientModInitializer {
 	public static final String MOD_ID = "practicedummy";
+	/** Set by /dummy gui; the screen is opened on the next tick so the chat screen doesn't close it. */
+	public static boolean openGui;
 
 	@Override
 	@SuppressWarnings("deprecation") // HudRenderCallback still works; it just has a newer replacement
@@ -36,11 +38,11 @@ public class PracticeDummyClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			DummyManager.tick(client);
 			DummyHud.tick();
-			DummyStats.tick();
-			DummyTracker.tick(client);
 			DummyBoost.tick(client);
-			if (DummyManager.openGuiRequested && client.currentScreen == null && client.player != null) {
-				DummyManager.openGuiRequested = false;
+			DummyCombat.tick(client);
+			DummyProjectiles.tick(client);
+			if (openGui) {
+				openGui = false;
 				client.setScreen(new DummyScreen());
 			}
 			while (guiKey.wasPressed()) client.setScreen(new DummyScreen());
