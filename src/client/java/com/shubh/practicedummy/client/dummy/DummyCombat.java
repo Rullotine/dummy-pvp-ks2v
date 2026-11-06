@@ -72,7 +72,7 @@ public final class DummyCombat {
 			for (ArrowEntity arrow : world.getEntitiesByClass(ArrowEntity.class, area, a -> a.getOwner() == player)) {
 				Vec3d vel = arrow.getVelocity();
 				if (arrow.isRemoved() || vel.lengthSquared() < 0.25) continue;
-				Vec3d to = arrow.getPos();
+				Vec3d to = new Vec3d(arrow.getX(), arrow.getY(), arrow.getZ());
 				Vec3d from = to.subtract(vel);
 				Box box = dummy.getBoundingBox().expand(0.3);
 				if (box.contains(to) || box.raycast(from, to).isPresent()) {
