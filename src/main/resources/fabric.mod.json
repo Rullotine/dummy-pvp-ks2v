@@ -1,0 +1,25 @@
+{
+	"schemaVersion": 1,
+	"id": "practicedummy",
+	"version": "${version}",
+	"name": "Practice Dummy",
+	"description": "Client-side fake player you can spawn anywhere (even on servers) to practice PvP, mace and spear combos on. Nothing is sent to the server.",
+	"authors": ["Shubh"],
+	"license": "CC0-1.0",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["com.shubh.practicedummy.client.PracticeDummyClient"]
+	},
+	"mixins": [
+		{
+			"config": "practicedummy.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.18.1",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
